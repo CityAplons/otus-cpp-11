@@ -16,7 +16,7 @@ set(Boost_USE_STATIC_LIBS OFF)
 set(Boost_USE_RELEASE_LIBS ON)
 set(Boost_USE_MULTITHREADED ON)  
 set(Boost_USE_STATIC_RUNTIME OFF) 
-find_package(Boost COMPONENTS filesystem program_options) 
+find_package(Boost COMPONENTS filesystem program_options thread) 
 
 # Include utility functions
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
@@ -39,6 +39,7 @@ target_link_libraries(mapreduce PRIVATE
     version
     Boost::filesystem
     Boost::program_options
+    Boost::thread
 )
 
 set_compile_options(mapreduce)

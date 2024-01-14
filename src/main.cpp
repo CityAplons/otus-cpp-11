@@ -48,22 +48,18 @@ main(int argc, char const *argv[]) {
 
     bool is_unique_found = false;
     unsigned result = 1;
-    while (!is_unique_found) {
+    while (!is_unique_found && result < 4) {
         mr.set_mapper([result](const std::string &line) {
             PrefixFindRunner::mapper_out out;
-            std::string sub_string{};
+            std::string sub_string = line.substr(0,result);
 
-            for (size_t i = 0; i < line.size() && i < result; ++i) {
-                sub_string += line[i];
-                out.push_back({sub_string, 1});
-            }
+            // std::string sub_string;
+            // for (size_t i = 0; i < line.size() && i < result; ++i) {
+            //     sub_string += line[i];
+            //     out.push_back({sub_string, 1});
+            // }
 
-            const auto comparator =
-                [](const PrefixFindRunner::mapper_chunk &a,
-                   const PrefixFindRunner::mapper_chunk &b) {
-                    return a.first < b.first;
-                };
-            out.sort(comparator);
+            out.push_back({sub_string, 1});
             return out;
         });
         mr.set_reducer([](const PrefixFindRunner::mapper_chunk &chunk) {

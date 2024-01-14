@@ -17,7 +17,7 @@ function(set_compile_options target)
         )
     else()
         target_compile_options(${target} PRIVATE
-            -Wall -Wextra -pedantic -Werror
+            -Wall -Wextra -pedantic -Werror -pthread
         )
     endif()
 endfunction()

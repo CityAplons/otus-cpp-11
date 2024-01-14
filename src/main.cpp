@@ -80,9 +80,12 @@ main(int argc, char const *argv[]) {
             return result;
         });
 
-        mr.run(file, std::format("out/iter{}", result));
+        if (mr.run(file, std::format("out/iter{}", result))) {
+            break;
+        }
         result++;
     }
 
+    std::cout << result << std::endl;
     return 0;
 }

@@ -63,12 +63,21 @@ main(int argc, char const *argv[]) {
             return out;
         });
         mr.set_reducer([](const PrefixFindRunner::mapper_chunk &chunk) {
+            static bool is_inited = false;
             static PrefixFindRunner::mapper_chunk previous;
+            if (!is_inited) {
+                previous = chunk;
+                is_inited = true;
+                return true;
+            }
+            
+            bool result = true;
             if (!chunk.first.compare(previous.first) || chunk.second > 1) {
-                return false;
+                result = false;
             }
 
-            return true;
+            previous = chunk;
+            return result;
         });
 
         mr.run(file, std::format("out/iter{}", result));

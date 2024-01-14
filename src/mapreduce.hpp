@@ -35,7 +35,6 @@ class PrefixFindRunner {
 
     void run(const std::filesystem::path &input_file,
              const std::filesystem::path &output_directory) {
-        std::vector<std::thread> map_workers;
 
         // Prepare
         auto blocks = split_file(input_file, mappers_count);
@@ -43,6 +42,7 @@ class PrefixFindRunner {
         // Map
         std::vector<std::filesystem::path> mapper_output_files;
         {
+            std::vector<std::thread> map_workers;
             unsigned iter = 1;
             for (auto &&block : blocks) {
                 using namespace std::literals;
@@ -62,27 +62,12 @@ class PrefixFindRunner {
         }
 
         // Shuffle
-        auto shuffle_output_files =
-            shuffle(mapper_output_files, output_directory / reducer_subdir,
-                    output_directory / shuffle_subdir, reducers_count);
+        auto shuffle_blocks =
+            shuffle(mapper_output_files, output_directory / shuffle_file,
+                    reducers_count);
+        // shuffle_blocks = align_blocks(shuffle_blocks);
 
-        // Создаём reducers_count новых файлов
-        // Из mappers_count файлов читаем данные (результат фазы map) и
-        // перекладываем в reducers_count (вход фазы reduce) Перекладываем так,
-        // чтобы:
-        //     * данные были отсортированы
-        //     * одинаковые ключи оказывались в одном файле, чтобы одинаковые
-        //     ключи попали на один редьюсер
-        //     * файлы примерно одинакового размера, чтобы редьюсеры были
-        //     загружены примерно равномерно
-        //
-        // Гуглить: алгоритмы во внешней памяти, external sorting, многопутевое
-        // слияние
-        //
-        // Для упрощения задачи делаем это в один поток
-        // Но все данные в память одновременно не загружаем, читаем построчно и
-        // пишем
-        //
+        // Reduce
         // Создаём reducers_count потоков
         // В каждом потоке читаем свой файл (выход предыдущей фазы)
         // Применяем к строкам функцию reducer
@@ -90,11 +75,30 @@ class PrefixFindRunner {
         //             (во многих задачах выход редьюсера - большие данные, хотя
         //             в нашей задаче можно написать функцию reduce так, чтобы
         //             выход не был большим)
+        std::vector<std::filesystem::path> reducer_output_files;
+        {
+            unsigned iter = 1;
+            std::vector<std::thread> reduce_workers;
+            for (auto &&block : shuffle_blocks) {
+                using namespace std::literals;
+                const auto actual_out =
+                    output_directory / reducer_subdir /
+                    ("reduce."s + std::to_string(iter) + ".txt");
+                std::thread t(&PrefixFindRunner::reducer_task, this,
+                              output_directory / shuffle_file, block,
+                              actual_out);
+                reduce_workers.emplace_back(std::move(t));
+                reducer_output_files.emplace_back(actual_out);
+                ++iter;
+            }
+
+            for (auto &&worker : reduce_workers) {
+                worker.join();
+            }
+        }
     }
 
   private:
-    using MinHeap = std::priority_queue<ipair, pairvector, Compare>;
-
     int mappers_count;
     mapper_func_type mapper;
 
@@ -103,11 +107,20 @@ class PrefixFindRunner {
 
     const char *mapper_subdir = "mapper/";
     const char *reducer_subdir = "reducer/";
-    const char *shuffle_subdir = "shuffle/";
+    const char *shuffle_file = "sorted.txt";
 
     struct Block {
         size_t from;
         size_t to;
+    };
+
+    template <bool reverse = false> struct Compare {
+        bool operator()(const mapper_chunk &a, const mapper_chunk &b) {
+            if (reverse) {
+                return a.first >= b.first;
+            }
+            return a.first < b.first;
+        };
     };
 
     std::vector<Block> split_file(const std::filesystem::path &file,
@@ -140,15 +153,16 @@ class PrefixFindRunner {
                      const std::filesystem::path output) {
         PrefixFindRunner::mapper_out out;
         auto id = std::this_thread::get_id();
+
+        std::stringstream id_stream;
+        id_stream << "[MAP@" << std::hex << id << std::dec << ']';
+        std::string thread_name;
+        id_stream >> thread_name;
+
         {
-            const auto comparator =
-                [](const PrefixFindRunner::mapper_chunk &a,
-                   const PrefixFindRunner::mapper_chunk &b) {
-                    return a.first < b.first;
-                };
             std::ifstream fobj(input);
             if (!fobj.is_open()) {
-                std::cout << '[' << id << "][ERROR][" << input
+                std::cout << thread_name << "[ERROR][" << input
                           << "]Failed to open input\n";
                 return;
             }
@@ -159,8 +173,8 @@ class PrefixFindRunner {
                 std::getline(fobj, line);
 
                 auto temp = mapper(line);
-                temp.sort(comparator);
-                out.merge(temp, comparator);
+                temp.sort(Compare<>());
+                out.merge(temp, Compare<>());
             }
 
             fobj.close();
@@ -168,10 +182,10 @@ class PrefixFindRunner {
 
         {
             auto dir = output.parent_path();
-            boost::filesystem::create_directories(dir.c_str());
+            boost::filesystem::create_directories(dir);
             std::ofstream out_fobj(output);
             if (!out_fobj.is_open()) {
-                std::cout << '[' << id << "][ERROR][" << output
+                std::cout << thread_name << "[ERROR][" << output
                           << "]Failed to write result\n";
                 return;
             }
@@ -186,14 +200,59 @@ class PrefixFindRunner {
         return;
     }
 
-    std::vector<std::filesystem::path>
-    shuffle(const std::vector<std::filesystem::path> &mapped,
-            const std::filesystem::path &tmp_dir,
-            const std::filesystem::path &out_dir, size_t block_count) {
-        std::vector<std::filesystem::path> shuffled;
-        boost::filesystem::create_directories(out_dir.c_str());
-        constexpr size_t readline_max = 3;
+    void reducer_task(const std::filesystem::path input, Block offsets,
+                      const std::filesystem::path output) {
+        auto id = std::this_thread::get_id();
+        std::stringstream id_stream;
+        id_stream << "[RED@" << std::hex << id << std::dec << ']';
+        std::string thread_name;
+        id_stream >> thread_name;
 
+        bool global_result = true;
+        {
+            std::ifstream fobj(input);
+            if (!fobj.is_open()) {
+                std::cout << thread_name << "[ERROR][" << input
+                          << "]Failed to open input\n";
+                return;
+            }
+
+            fobj.seekg(offsets.from, std::ios::beg);
+            while (static_cast<size_t>(fobj.tellg()) < offsets.to) {
+                std::string line;
+                std::getline(fobj, line);
+
+                auto separator = line.find(' ');
+                std::string token = line.substr(0, separator);
+                int repeats = std::atoi(
+                    line.substr(separator + 1, line.find('\n')).c_str());
+                global_result &= reducer({token, repeats});
+            }
+
+            fobj.close();
+        }
+
+        {
+            auto dir = output.parent_path();
+            boost::filesystem::create_directories(dir);
+            std::ofstream out_fobj(output);
+            if (!out_fobj.is_open()) {
+                std::cout << thread_name << "[ERROR][" << output
+                          << "]Failed to write result\n";
+                return;
+            }
+
+            out_fobj.seekp(0);
+            out_fobj << global_result << '\n';
+            out_fobj.close();
+        }
+
+        return;
+    }
+
+    std::vector<Block> shuffle(const std::vector<std::filesystem::path> &mapped,
+                               const std::filesystem::path &tmp_file,
+                               size_t block_count) {
         std::vector<std::ifstream> mapped_files;
         for (auto &&path : mapped) {
             std::ifstream file(path);
@@ -201,40 +260,46 @@ class PrefixFindRunner {
             mapped_files.push_back(std::move(file));
         }
 
+        // Actual external merge
+        {
+            std::priority_queue<mapper_chunk, std::vector<mapper_chunk>,
+                                Compare<true>>
+                heap;
+            std::ofstream out_fobj(tmp_file);
+            assert(out_fobj.is_open());
+
+            for (size_t i = 0; i < mapped_files.size(); ++i) {
+                std::string top_value;
+                std::getline(mapped_files[i], top_value);
+                // top_value = top_value.substr(0, top_value.find(' '));
+
+                mapper_chunk top{top_value, i};
+                heap.push(top);
+            }
+
+            out_fobj.seekp(0);
+            while (heap.size() > 0) {
+                std::string next_value;
+
+                auto min = heap.top();
+                heap.pop();
+
+                out_fobj << min.first << std::endl;
+                if (std::getline(mapped_files[min.second], next_value)) {
+                    mapper_chunk next{next_value, min.second};
+                    heap.push(next);
+                }
+            }
+
+            out_fobj.close();
+        }
+
         for (auto &&file : mapped_files) {
             file.close();
         }
 
-        return std::vector<std::filesystem::path>{};
+        return split_file(tmp_file, block_count);
     }
 
-    // std::string mergeFiles(size_t chunks, const std::string &merge_file) {
-    //     std::ofstream ofs(merge_file.c_str());
-    //     MinHeap minHeap;
-
-    //     // array of ifstreams
-    //     std::ifstream *ifs_tempfiles = new std::ifstream[chunks];
-
-    //     for (size_t i = 1; i <= chunks; i++) {
-    //         int topval = 0;
-
-    //         // generate a unique name for temp file (temp_out_1.txt ,
-    //         // temp_out_2.txt ..)
-    //         std::string sorted_file =
-    //             (tmp_prefix + std::to_string(i) + tmp_suffix);
-
-    //         // open an input file stream object for each name
-    //         ifs_tempfiles[i - 1].open(
-    //             sorted_file.c_str());   // bind to tmp_out_{i}.txt
-
-    //         // get val from temp file
-    //         if (ifs_tempfiles[i - 1].is_open()) {
-    //             ifs_tempfiles[i - 1] >>
-    //                 topval;   // first value in the file (min)
-
-    //             ipair top(topval, (i - 1));   // 2nd value is tempfile number
-
-    //             minHeap.push(top);   //  minHeap autosorts
-    //         }
-    //     }
-    };
+    // std::vector<Block> align_blocks(const std::vector<Block> &blocks) {}
+};

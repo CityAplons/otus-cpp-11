@@ -40,9 +40,11 @@ You may add a `-DMAKE_PACKAGE=<OFF|ON>` to disable or enable packages of a proje
 Порядок запуска:
 
 ```bash
-mapreduce <src> <mnum> <rnum>
+./mapreduce -i <src> -m <mnum> -r <rnum> -d1
 ```
 
 * src – путь к файлу с исходными данными
 * mnum – количество потоков для работы отображения
 * runm – количество потоков для работы свертки
+
+Для тестов можно использовать `test.txt` в корне проекта.

@@ -34,7 +34,7 @@ target_include_directories(version
 )
 
 # Describe build targets
-add_executable(mapreduce src/main.cpp)
+add_executable(mapreduce src/main.cpp src/mapreduce.cpp src/runner.cpp)
 target_link_libraries(mapreduce PRIVATE
     version
     Boost::filesystem
@@ -46,6 +46,10 @@ set_compile_options(mapreduce)
 set_compile_options(version)
 
 install(TARGETS mapreduce
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
+
+install(FILES test.txt
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 

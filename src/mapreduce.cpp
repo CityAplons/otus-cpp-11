@@ -1,31 +1,7 @@
 #include "mapreduce.hpp"
+#include "log.hpp"
 
-std::vector<PrefixFindRunner::Block>
-PrefixFindRunner::split_file(const std::filesystem::path &file,
-                             size_t blocks_count) {
-    auto size = std::filesystem::file_size(file);
-    auto chunk = size / blocks_count;
-
-    std::ifstream fobj(file);
-    assert(fobj.is_open());
-
-    std::vector<Block> out;
-    size_t offset = 0;
-    for (size_t i = 0; i < blocks_count; ++i) {
-        std::string unused;
-        auto start = offset;
-
-        offset += chunk;
-        fobj.seekg(offset, std::ios::beg);
-        std::getline(fobj, unused);
-
-        offset = fobj.tellg();
-        out.push_back({start, offset});
-    }
-
-    fobj.close();
-    return out;
-}
+namespace otus {
 
 void
 PrefixFindRunner::mapper_task(const std::filesystem::path input,
@@ -42,8 +18,8 @@ PrefixFindRunner::mapper_task(const std::filesystem::path input,
     {
         std::ifstream fobj(input);
         if (!fobj.is_open()) {
-            std::cout << thread_name << "[ERROR][" << input
-                      << "]Failed to open input\n";
+            Log::Get().Error("[{}] Failed to open input '{}'", thread_name,
+                             input.c_str());
             return;
         }
 
@@ -65,8 +41,8 @@ PrefixFindRunner::mapper_task(const std::filesystem::path input,
         boost::filesystem::create_directories(dir);
         std::ofstream out_fobj(output);
         if (!out_fobj.is_open()) {
-            std::cout << thread_name << "[ERROR][" << output
-                      << "]Failed to write result\n";
+            Log::Get().Error("[{}] Failed to write result '{}'", thread_name,
+                             output.c_str());
             return;
         }
 
@@ -94,8 +70,8 @@ PrefixFindRunner::reducer_task(const std::filesystem::path input,
     {
         std::ifstream fobj(input);
         if (!fobj.is_open()) {
-            std::cout << thread_name << "[ERROR][" << input
-                      << "]Failed to open input\n";
+            Log::Get().Error("[{}] Failed to open input '{}'", thread_name,
+                             input.c_str());
             return;
         }
 
@@ -119,8 +95,8 @@ PrefixFindRunner::reducer_task(const std::filesystem::path input,
         boost::filesystem::create_directories(dir);
         std::ofstream out_fobj(output);
         if (!out_fobj.is_open()) {
-            std::cout << thread_name << "[ERROR][" << output
-                      << "]Failed to write result\n";
+            Log::Get().Error("[{}] Failed to write result '{}'", thread_name,
+                             output.c_str());
             return;
         }
 
@@ -130,6 +106,34 @@ PrefixFindRunner::reducer_task(const std::filesystem::path input,
     }
 
     return;
+}
+
+std::vector<PrefixFindRunner::Block>
+PrefixFindRunner::split_file(const std::filesystem::path &file,
+                             size_t blocks_count) {
+    auto size = std::filesystem::file_size(file);
+    auto chunk = size / blocks_count;
+
+    std::ifstream fobj(file);
+    assert(fobj.is_open());
+
+    std::vector<Block> out;
+    size_t offset = 0;
+    for (size_t i = 0; i < blocks_count; ++i) {
+        std::string unused;
+        auto start = offset;
+
+        offset += chunk;
+        fobj.seekg(offset, std::ios::beg);
+        std::getline(fobj, unused);
+
+        auto point = fobj.tellg();
+        offset = point < 0 ? offset : static_cast<size_t>(point);
+        out.push_back({start, offset});
+    }
+
+    fobj.close();
+    return out;
 }
 
 std::vector<PrefixFindRunner::Block>
@@ -185,6 +189,75 @@ PrefixFindRunner::shuffle(const std::vector<std::filesystem::path> &mapped,
 }
 
 std::vector<PrefixFindRunner::Block>
-PrefixFindRunner::align_blocks(const std::vector<Block> &blocks) {
-    return blocks;
+PrefixFindRunner::align_blocks(const std::filesystem::path &path,
+                               const std::vector<Block> &blocks) {
+
+    std::ifstream fobj(path);
+    assert(fobj.is_open());
+
+    std::vector<Block> out;
+    size_t new_start_offset = blocks[0].from;
+    size_t new_end_offset = blocks[0].to;
+    for (size_t i = 0; i < blocks.size(); ++i) {
+        bool is_unique = false;
+        std::string previous;
+        new_end_offset = blocks[i].to;
+
+        fobj.clear();
+        fobj.seekg(new_end_offset, std::ios::beg);
+        Log::Get().Debug("Old tail 0x{:X}", new_end_offset);
+
+        auto step_back = [](std::ifstream &stream) {
+            char rewind_char = '\n';
+            stream.seekg(-1, std::ios::cur);
+            stream.get(rewind_char);
+            stream.seekg(-1, std::ios::cur);
+            return rewind_char;
+        };
+
+        char cur_char = '_';
+        step_back(fobj);
+        step_back(fobj);   // Skip the last \n
+        while (cur_char != '\n') {
+            if (fobj.eof() || fobj.tellg() == 0) {
+                break;
+            }
+            cur_char = step_back(fobj);
+            // std::cout << cur_char;
+        }
+
+        auto cur_pos = fobj.tellg();
+        if (cur_pos > 0) {
+            new_end_offset = static_cast<size_t>(cur_pos);
+            ++new_end_offset;
+        }
+
+        fobj.clear();
+        fobj.seekg(new_end_offset, std::ios::beg);
+        Log::Get().Debug("Aligned tail 0x{:X}", new_end_offset);
+
+        std::getline(fobj, previous);
+        while (!is_unique && !fobj.eof()) {
+            std::string current;
+            new_end_offset = fobj.tellg();
+            std::getline(fobj, current);
+
+            if (current.compare(previous) != 0) {
+                is_unique = true;
+                break;
+            }
+
+            previous = current;
+        }
+
+        out.push_back({new_start_offset, new_end_offset});
+        Log::Get().Debug("Aligned lines {}...{}", new_start_offset / 4,
+                         new_end_offset / 4);
+        new_start_offset = new_end_offset;
+    }
+
+    fobj.close();
+    return out;
 }
+
+}   // namespace otus

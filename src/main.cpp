@@ -3,13 +3,18 @@
 
 #include <boost/program_options.hpp>
 
+#include "log.hpp"
 #include "mapreduce.hpp"
+
 #include "project.h"
 
 int
 main(int argc, char const *argv[]) {
+    using namespace otus;
+
     struct ProjectInfo info = {};
-    std::cout << info.nameString << "\t" << info.versionString << '\n';
+    Log::Get().SetSeverity(Log::INFO);
+    Log::Get().Info("{}\t{}", info.nameString, info.versionString);
 
     namespace po = boost::program_options;
     po::options_description desc(
@@ -17,7 +22,8 @@ main(int argc, char const *argv[]) {
     desc.add_options()("help", "Produce this help message")(
         "input,i", po::value<std::string>(), "Input filename to process")(
         "mappers,m", po::value<int>(), "Amount of the mappers threads")(
-        "reducers,r", po::value<int>(), "Amount of the reducers threads");
+        "reducers,r", po::value<int>(), "Amount of the reducers threads")(
+        "debug,d", po::value<bool>(), "Enable debug output");
 
     po::variables_map vm;
     po::store(po::parse_command_line(argc, argv, desc), vm);
@@ -28,9 +34,14 @@ main(int argc, char const *argv[]) {
         return 1;
     }
 
+    if (vm.count("debug")) {
+        Log::Get().SetSeverity(Log::DEBUG);
+    }
+
     std::string file;
     if (!vm.count("input")) {
-        std::cout << "No input was provided!\n" << desc << "\n";
+        Log::Get().Error("No input was provided!\n");
+        std::cout << desc << "\n";
         return 2;
     }
     file = vm["input"].as<std::string>();
@@ -41,9 +52,8 @@ main(int argc, char const *argv[]) {
         rd_count = vm["reducers"].as<int>();
     }
 
-    std::cout << std::format("Using {} mappers, {} reducers with \"{}\" file",
-                             mp_count, rd_count, file)
-              << "\n";
+    Log::Get().Info("Using {} mappers, {} reducers with \"{}\" file", mp_count,
+                    rd_count, file);
     PrefixFindRunner mr(mp_count, rd_count);
 
     bool is_unique_found = false;
@@ -51,7 +61,7 @@ main(int argc, char const *argv[]) {
     while (!is_unique_found && result < 4) {
         mr.set_mapper([result](const std::string &line) {
             PrefixFindRunner::mapper_out out;
-            std::string sub_string = line.substr(0,result);
+            std::string sub_string = line.substr(0, result);
 
             // std::string sub_string;
             // for (size_t i = 0; i < line.size() && i < result; ++i) {
@@ -70,7 +80,7 @@ main(int argc, char const *argv[]) {
                 is_inited = true;
                 return true;
             }
-            
+
             bool result = true;
             if (!chunk.first.compare(previous.first) || chunk.second > 1) {
                 result = false;
@@ -86,6 +96,6 @@ main(int argc, char const *argv[]) {
         result++;
     }
 
-    std::cout << result << std::endl;
+    Log::Get().Info("Result = {}", result);
     return 0;
 }

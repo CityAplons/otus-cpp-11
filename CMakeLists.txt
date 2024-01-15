@@ -49,6 +49,10 @@ install(TARGETS mapreduce
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 
+install(FILES test.txt
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
+
 # Describe unit tests
 enable_testing()
 add_unit_test(test/test_version.cpp version)

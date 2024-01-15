@@ -16,6 +16,8 @@
 #include <boost/algorithm/string.hpp>
 #include <boost/filesystem.hpp>
 
+namespace otus {
+
 class PrefixFindRunner {
   public:
     // TODO: remove it by presenting serializers between steps
@@ -45,7 +47,7 @@ class PrefixFindRunner {
 
     const char *mapper_subdir = "mapper/";
     const char *reducer_subdir = "reducer/";
-    const char *shuffle_file = "sorted.txt";
+    const char *shuffle_file = "temp.txt";
 
     struct Block {
         size_t from;
@@ -74,5 +76,8 @@ class PrefixFindRunner {
                                const std::filesystem::path &tmp_file,
                                size_t block_count);
 
-    std::vector<Block> align_blocks(const std::vector<Block> &blocks);
+    std::vector<Block> align_blocks(const std::filesystem::path &path,
+                                    const std::vector<Block> &blocks);
 };
+
+}   // namespace otus

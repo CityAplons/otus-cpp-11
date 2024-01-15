@@ -1,5 +1,7 @@
 #include "mapreduce.hpp"
 
+namespace otus {
+
 bool
 PrefixFindRunner::run(const std::filesystem::path &input_file,
                       const std::filesystem::path &output_directory) {
@@ -30,7 +32,8 @@ PrefixFindRunner::run(const std::filesystem::path &input_file,
     // Shuffle
     auto shuffle_blocks = shuffle(
         mapper_output_files, output_directory / shuffle_file, reducers_count);
-    shuffle_blocks = align_blocks(shuffle_blocks);
+    shuffle_blocks =
+        align_blocks(output_directory / shuffle_file, shuffle_blocks);
 
     // Reduce
     std::vector<std::filesystem::path> reducer_output_files;
@@ -53,7 +56,7 @@ PrefixFindRunner::run(const std::filesystem::path &input_file,
             worker.join();
         }
 
-        std::filesystem::remove(output_directory / shuffle_file);
+        // std::filesystem::remove(output_directory / shuffle_file);
     }
 
     // Aggregate
@@ -78,3 +81,5 @@ PrefixFindRunner::run(const std::filesystem::path &input_file,
 
     return result;
 }
+
+}   // namespace otus

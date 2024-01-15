@@ -40,7 +40,7 @@ You may add a `-DMAKE_PACKAGE=<OFF|ON>` to disable or enable packages of a proje
 Порядок запуска:
 
 ```bash
-./mapreduce -i <src> -m <mnum> -r <rnum>
+./mapreduce -i <src> -m <mnum> -r <rnum> -d1
 ```
 
 * src – путь к файлу с исходными данными

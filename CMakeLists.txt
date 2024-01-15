@@ -50,7 +50,7 @@ install(TARGETS mapreduce
 )
 
 install(FILES test.txt
-    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 
 # Describe unit tests

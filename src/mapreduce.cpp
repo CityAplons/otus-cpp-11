@@ -38,7 +38,7 @@ PrefixFindRunner::mapper_task(const std::filesystem::path input,
 
     {
         auto dir = output.parent_path();
-        boost::filesystem::create_directories(dir);
+        boost::filesystem::create_directories(dir.c_str());
         std::ofstream out_fobj(output);
         if (!out_fobj.is_open()) {
             Log::Get().Error("[{}] Failed to write result '{}'", thread_name,
@@ -92,7 +92,7 @@ PrefixFindRunner::reducer_task(const std::filesystem::path input,
 
     {
         auto dir = output.parent_path();
-        boost::filesystem::create_directories(dir);
+        boost::filesystem::create_directories(dir.c_str());
         std::ofstream out_fobj(output);
         if (!out_fobj.is_open()) {
             Log::Get().Error("[{}] Failed to write result '{}'", thread_name,
